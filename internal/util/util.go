@@ -19,6 +19,8 @@ package util
 import (
 	"context"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"strings"
 	"time"
 
@@ -36,6 +38,7 @@ import (
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
 
+	volumesnapmoverv1alpha1 "github.com/konveyor/volume-snapshot-mover/api/v1alpha1"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/restic"
@@ -139,6 +142,44 @@ func GetVolumeSnapshotClassForStorageClass(provisioner string, snapshotClient sn
 	return nil, errors.Errorf("failed to get volumesnapshotclass for provisioner %s, ensure that the desired volumesnapshot class has the %s label", provisioner, VolumeSnapshotClassSelectorLabel)
 }
 
+// Get DataMoverBackup CR with complete status fields
+func GetDataMoverbackupWithCompletedStatus(datamoverbackup *volumesnapmoverv1alpha1.DataMoverBackup, log logrus.FieldLogger) (*volumesnapmoverv1alpha1.DataMoverBackup, error) {
+
+	timeout := 10 * time.Minute
+	interval := 5 * time.Second
+	var dmb volumesnapmoverv1alpha1.DataMoverBackup
+
+	datamoverClient, err := GetDatamoverClient()
+	if err != nil {
+		return nil, err
+	}
+
+	err = wait.PollImmediate(interval, timeout, func() (bool, error) {
+		err := datamoverClient.Get(context.TODO(), client.ObjectKey{Namespace: datamoverbackup.Namespace, Name: datamoverbackup.Name}, &dmb)
+
+		if err != nil {
+			return false, errors.Wrapf(err, fmt.Sprintf("failed to get datamoverbackup %s/%s", datamoverbackup.Namespace, datamoverbackup.Name))
+		}
+
+		if &dmb.Status == nil || &dmb.Status.Completed == nil || dmb.Status.Phase != volumesnapmoverv1alpha1.DatamoverBackupPhaseCompleted {
+			log.Infof("Waiting for volumesnapshotmover controller to reconcile datamoverbackup %s/%s. Retrying in %ds", datamoverbackup.Namespace, datamoverbackup.Name, interval/time.Second)
+			return false, nil
+		}
+
+		return true, nil
+
+	})
+
+	if err != nil {
+		if err == wait.ErrWaitTimeout {
+			log.Errorf("Timed out awaiting reconciliation of datamoverbackup %s/%s", datamoverbackup.Namespace, datamoverbackup.Name)
+		}
+		return nil, err
+	}
+
+	return &dmb, nil
+}
+
 // GetVolumeSnapshotContentForVolumeSnapshot returns the volumesnapshotcontent object associated with the volumesnapshot
 func GetVolumeSnapshotContentForVolumeSnapshot(volSnap *snapshotv1beta1api.VolumeSnapshot, snapshotClient snapshotter.SnapshotV1beta1Interface, log logrus.FieldLogger, shouldWait bool) (*snapshotv1beta1api.VolumeSnapshotContent, error) {
 	if !shouldWait {
@@ -196,6 +237,16 @@ func GetVolumeSnapshotContentForVolumeSnapshot(volSnap *snapshotv1beta1api.Volum
 	return snapshotContent, nil
 }
 
+func GetDatamoverClient() (client.Client, error) {
+	client2, err := client.New(config.GetConfigOrDie(), client.Options{})
+	if err != nil {
+		return nil, err
+	}
+	volumesnapmoverv1alpha1.AddToScheme(client2.Scheme())
+
+	return client2, err
+}
+
 func GetClients() (*kubernetes.Clientset, *snapshotterClientSet.Clientset, error) {
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	configOverrides := &clientcmd.ConfigOverrides{}
@@ -204,7 +255,6 @@ func GetClients() (*kubernetes.Clientset, *snapshotterClientSet.Clientset, error
 	if err != nil {
 		return nil, nil, errors.WithStack(err)
 	}
-
 	client, err := kubernetes.NewForConfig(clientConfig)
 	if err != nil {
 		return nil, nil, errors.WithStack(err)
