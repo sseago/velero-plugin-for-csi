@@ -29,11 +29,12 @@ func (p *DataMoverBackupItemAction) AppliesTo() (velero.ResourceSelector, error)
 // Execute backs up a DataMoverBackup object with a completely filled status
 func (p *DataMoverBackupItemAction) Execute(item runtime.Unstructured, backup *velerov1api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, error) {
 	p.Log.Infof("Executing DataMoverBackupItemAction")
-
-	var dmb volumesnapmoverv1alpha1.DataMoverBackup
+	p.Log.Infof("Executing on item: %v", item)
+	dmb := volumesnapmoverv1alpha1.DataMoverBackup{}
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), &dmb); err != nil {
 		return nil, nil, errors.WithStack(err)
 	}
+	p.Log.Infof("Converted Item to DMB: %v", dmb)
 	dmbNew, err := util.GetDataMoverbackupWithCompletedStatus(dmb.Namespace, dmb.Name, p.Log)
 
 	if err != nil {
@@ -42,7 +43,11 @@ func (p *DataMoverBackupItemAction) Execute(item runtime.Unstructured, backup *v
 
 	p.Log.Infof("Value of dmbNew is : %v", dmbNew)
 
-	dmbMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&dmbNew)
+	p.Log.Infof("Value of dmbNew status: %v", dmbNew.Status)
+
+	dmb.Status = *dmbNew.Status.DeepCopy()
+
+	dmbMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&dmb)
 	if err != nil {
 		return nil, nil, errors.WithStack(err)
 	}

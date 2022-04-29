@@ -64,10 +64,6 @@ func (p *VolumeSnapshotContentBackupItemAction) Execute(item runtime.Unstructure
 			Name:      fmt.Sprint("dmb-" + snapCont.Spec.VolumeSnapshotRef.Name),
 			Namespace: snapCont.Spec.VolumeSnapshotRef.Namespace,
 		},
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "DataMoverBackup",
-			APIVersion: "pvc.oadp.openshift.io/v1alpha1",
-		},
 		Spec: volumesnapmoverv1alpha1.DataMoverBackupSpec{
 			VolumeSnapshotContent: corev1api.ObjectReference{
 				Name: snapCont.Name,

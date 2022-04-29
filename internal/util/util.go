@@ -147,7 +147,7 @@ func GetDataMoverbackupWithCompletedStatus(datamoverbackupNS string, datamoverba
 
 	timeout := 5 * time.Minute
 	interval := 5 * time.Second
-	var dmb volumesnapmoverv1alpha1.DataMoverBackup
+	dmb := volumesnapmoverv1alpha1.DataMoverBackup{}
 
 	datamoverClient, err := GetDatamoverClient()
 	if err != nil {
@@ -156,12 +156,12 @@ func GetDataMoverbackupWithCompletedStatus(datamoverbackupNS string, datamoverba
 
 	err = wait.PollImmediate(interval, timeout, func() (bool, error) {
 		err := datamoverClient.Get(context.TODO(), client.ObjectKey{Namespace: datamoverbackupNS, Name: datamoverbackupName}, &dmb)
-
+		log.Infof("Inside GetDataMoverbackupWithCompletedStatus, Fetched DMB: %v ", dmb)
 		if err != nil {
 			return false, errors.Wrapf(err, fmt.Sprintf("failed to get datamoverbackup %s/%s", datamoverbackupNS, datamoverbackupName))
 		}
 
-		if len(dmb.Status.Phase) > 0 && dmb.Status.Phase != volumesnapmoverv1alpha1.DatamoverBackupPhaseCompleted {
+		if len(dmb.Status.Phase) == 0 || dmb.Status.Phase != volumesnapmoverv1alpha1.DatamoverBackupPhaseCompleted {
 			log.Infof("Waiting for datamoverbackup %s/%s to complete. Retrying in %ds", datamoverbackupNS, datamoverbackupName, interval/time.Second)
 			return false, nil
 		}
@@ -176,7 +176,7 @@ func GetDataMoverbackupWithCompletedStatus(datamoverbackupNS string, datamoverba
 		}
 		return dmb, err
 	}
-
+	log.Infof("Return DMB from GetDataMoverbackupWithCompletedStatus: %v", dmb)
 	return dmb, nil
 }
 
