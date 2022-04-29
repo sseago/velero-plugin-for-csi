@@ -143,26 +143,26 @@ func GetVolumeSnapshotClassForStorageClass(provisioner string, snapshotClient sn
 }
 
 // Get DataMoverBackup CR with complete status fields
-func GetDataMoverbackupWithCompletedStatus(datamoverbackup *volumesnapmoverv1alpha1.DataMoverBackup, log logrus.FieldLogger) (*volumesnapmoverv1alpha1.DataMoverBackup, error) {
+func GetDataMoverbackupWithCompletedStatus(datamoverbackupNS string, datamoverbackupName string, log logrus.FieldLogger) (volumesnapmoverv1alpha1.DataMoverBackup, error) {
 
-	timeout := 10 * time.Minute
+	timeout := 5 * time.Minute
 	interval := 5 * time.Second
 	var dmb volumesnapmoverv1alpha1.DataMoverBackup
 
 	datamoverClient, err := GetDatamoverClient()
 	if err != nil {
-		return nil, err
+		return dmb, err
 	}
 
 	err = wait.PollImmediate(interval, timeout, func() (bool, error) {
-		err := datamoverClient.Get(context.TODO(), client.ObjectKey{Namespace: datamoverbackup.Namespace, Name: datamoverbackup.Name}, &dmb)
+		err := datamoverClient.Get(context.TODO(), client.ObjectKey{Namespace: datamoverbackupNS, Name: datamoverbackupName}, &dmb)
 
 		if err != nil {
-			return false, errors.Wrapf(err, fmt.Sprintf("failed to get datamoverbackup %s/%s", datamoverbackup.Namespace, datamoverbackup.Name))
+			return false, errors.Wrapf(err, fmt.Sprintf("failed to get datamoverbackup %s/%s", datamoverbackupNS, datamoverbackupName))
 		}
 
-		if &dmb.Status == nil || &dmb.Status.Completed == nil || dmb.Status.Phase != volumesnapmoverv1alpha1.DatamoverBackupPhaseCompleted {
-			log.Infof("Waiting for volumesnapshotmover controller to reconcile datamoverbackup %s/%s. Retrying in %ds", datamoverbackup.Namespace, datamoverbackup.Name, interval/time.Second)
+		if len(dmb.Status.Phase) > 0 && dmb.Status.Phase != volumesnapmoverv1alpha1.DatamoverBackupPhaseCompleted {
+			log.Infof("Waiting for datamoverbackup %s/%s to complete. Retrying in %ds", datamoverbackupNS, datamoverbackupName, interval/time.Second)
 			return false, nil
 		}
 
@@ -172,12 +172,12 @@ func GetDataMoverbackupWithCompletedStatus(datamoverbackup *volumesnapmoverv1alp
 
 	if err != nil {
 		if err == wait.ErrWaitTimeout {
-			log.Errorf("Timed out awaiting reconciliation of datamoverbackup %s/%s", datamoverbackup.Namespace, datamoverbackup.Name)
+			log.Errorf("Timed out awaiting reconciliation of datamoverbackup %s/%s", datamoverbackupNS, datamoverbackupName)
 		}
-		return nil, err
+		return dmb, err
 	}
 
-	return &dmb, nil
+	return dmb, nil
 }
 
 // GetVolumeSnapshotContentForVolumeSnapshot returns the volumesnapshotcontent object associated with the volumesnapshot

@@ -30,17 +30,19 @@ func (p *DataMoverBackupItemAction) AppliesTo() (velero.ResourceSelector, error)
 func (p *DataMoverBackupItemAction) Execute(item runtime.Unstructured, backup *velerov1api.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, error) {
 	p.Log.Infof("Executing DataMoverBackupItemAction")
 
-	var dmb *volumesnapmoverv1alpha1.DataMoverBackup
+	var dmb volumesnapmoverv1alpha1.DataMoverBackup
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), &dmb); err != nil {
 		return nil, nil, errors.WithStack(err)
 	}
-	dmb, err := util.GetDataMoverbackupWithCompletedStatus(dmb, p.Log)
+	dmbNew, err := util.GetDataMoverbackupWithCompletedStatus(dmb.Namespace, dmb.Name, p.Log)
 
 	if err != nil {
 		return nil, nil, errors.WithStack(err)
 	}
 
-	dmbMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&dmb)
+	p.Log.Infof("Value of dmbNew is : %v", dmbNew)
+
+	dmbMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&dmbNew)
 	if err != nil {
 		return nil, nil, errors.WithStack(err)
 	}
