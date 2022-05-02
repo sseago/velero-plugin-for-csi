@@ -17,13 +17,17 @@ limitations under the License.
 package backup
 
 import (
+	"context"
+	"fmt"
+	snapshotv1beta1api "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1beta1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-
-	snapshotv1beta1api "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1beta1"
+	corev1api "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	volumesnapmoverv1alpha1 "github.com/konveyor/volume-snapshot-mover/api/v1alpha1"
 	"github.com/vmware-tanzu/velero-plugin-for-csi/internal/util"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
@@ -40,7 +44,7 @@ func (p *VolumeSnapshotContentBackupItemAction) AppliesTo() (velero.ResourceSele
 	p.Log.Debug("VolumeSnapshotBackupItemAction AppliesTo")
 
 	return velero.ResourceSelector{
-		IncludedResources: []string{"volumesnapshotcontent.snapshot.storage.k8s.io"},
+		IncludedResources: []string{"volumesnapshotcontents.snapshot.storage.k8s.io"},
 	}, nil
 }
 
@@ -54,6 +58,30 @@ func (p *VolumeSnapshotContentBackupItemAction) Execute(item runtime.Unstructure
 		return nil, nil, errors.WithStack(err)
 	}
 
+	// craft a  Datamoverbackup object to be created
+	dmb := volumesnapmoverv1alpha1.DataMoverBackup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprint("dmb-" + snapCont.Spec.VolumeSnapshotRef.Name),
+			Namespace: snapCont.Spec.VolumeSnapshotRef.Namespace,
+		},
+		Spec: volumesnapmoverv1alpha1.DataMoverBackupSpec{
+			VolumeSnapshotContent: corev1api.ObjectReference{
+				Name: snapCont.Name,
+			},
+			ProtectedNamespace: backup.Namespace,
+		},
+	}
+
+	dmbClient, err := util.GetDatamoverClient()
+
+	err = dmbClient.Create(context.Background(), &dmb)
+
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "error creating datamoverbackup CR")
+	}
+
+	p.Log.Infof("Created datamoverbackup %s", fmt.Sprintf("%s/%s", dmb.Namespace, dmb.Name))
+
 	additionalItems := []velero.ResourceIdentifier{}
 
 	// we should backup the snapshot deletion secrets that may be referenced in the volumesnapshotcontent's annotation
@@ -66,6 +94,14 @@ func (p *VolumeSnapshotContentBackupItemAction) Execute(item runtime.Unstructure
 		})
 	}
 
+	// adding datamoverbackup instance as an additional item, need to block the plugin execution till DMB CR is recon complete
+	additionalItems = append(additionalItems, velero.ResourceIdentifier{
+		GroupResource: schema.GroupResource{Group: "pvc.oadp.openshift.io", Resource: "datamoverbackup"},
+		Name:          dmb.Name,
+		Namespace:     dmb.Namespace,
+	})
+
+	p.Log.Infof("Additional items in vsc action %v", additionalItems)
 	p.Log.Infof("Returning from VolumeSnapshotContentBackupItemAction with %d additionalItems to backup", len(additionalItems))
 	return item, additionalItems, nil
 }
